@@ -338,6 +338,27 @@
   <div class="footer">플랜두씨 다이어리</div>
 </div>
 
+<div class="modal" id="planDeleteModal">
+  <div class="modal-box" style="width:min(480px,100%)">
+    <div class="modal-hd">
+      <b>계획 삭제</b>
+      <button class="x" id="closePlanDeleteModal">×</button>
+    </div>
+    <div class="modal-bd">
+      <input type="hidden" id="deletePlanId">
+      <div style="font-weight:900;font-size:17px;margin-bottom:8px" id="deletePlanTitle"></div>
+      <div class="muted" style="line-height:1.65">
+        이 계획을 삭제할까요?<br>
+        연결된 할 일과 실행 기록, 회고도 함께 삭제됩니다.
+      </div>
+      <div class="actions" style="margin-top:18px">
+        <button class="btn danger" id="confirmDeletePlanBtn">삭제</button>
+        <button class="btn ghost" id="cancelDeletePlanBtn">취소</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="todoModal">
   <div class="modal-box">
     <div class="modal-hd"><b id="todoModalTitle">할 일 추가</b><button class="x" id="closeTodoModal">×</button></div>
@@ -610,6 +631,7 @@ function renderPlanList(){
           <div class="plan-item-actions">
             ${active?'<span class="chip">현재 선택</span>':`<button class="btn primary small" onclick="selectSavedPlan('${p.id}')">이 계획 사용</button>`}
             <button class="btn ghost small" onclick="editSavedPlan('${p.id}')">계획 수정</button>
+            <button class="btn danger small" onclick="openDeletePlan('${p.id}')">삭제</button>
           </div>
         </div>
         <div class="meta">
@@ -670,8 +692,48 @@ function editSavedPlan(id){
   if(tab) tab.click();
 }
 
+function openDeletePlan(id){
+  const p=state.plans.find(x=>x.id===id);
+  if(!p){toast("계획을 찾을 수 없습니다.");return;}
+
+  $("#deletePlanId").value=id;
+  $("#deletePlanTitle").textContent=p.title;
+  $("#planDeleteModal").classList.add("show");
+}
+
+function closeDeletePlan(){
+  $("#planDeleteModal").classList.remove("show");
+  $("#deletePlanId").value="";
+  $("#deletePlanTitle").textContent="";
+}
+
+async function deletePlan(){
+  const id=$("#deletePlanId").value;
+  if(!id)return;
+
+  $("#confirmDeletePlanBtn").disabled=true;
+
+  try{
+    await diaryAction("delete-plan",{id});
+
+    if(state.plan?.id===id){
+      state.plan=null;
+      clearPlanForm();
+    }
+
+    closeDeletePlan();
+    await refreshAll();
+    toast("계획을 삭제했습니다.");
+  }catch(error){
+    toast(error.message);
+  }finally{
+    $("#confirmDeletePlanBtn").disabled=false;
+  }
+}
+
 window.selectSavedPlan=selectSavedPlan;
 window.editSavedPlan=editSavedPlan;
+window.openDeletePlan=openDeletePlan;
 
 function renderCurrentPlan(){
   const el=$("#currentPlanView"),p=state.plan;
@@ -1061,6 +1123,10 @@ $("#logoutBtn").onclick=signOut;
 
 $("#savePlanBtn").onclick=savePlan;
 $("#loadLatestPlanBtn").onclick=loadLatestPlan;
+$("#confirmDeletePlanBtn").onclick=deletePlan;
+$("#closePlanDeleteModal").onclick=closeDeletePlan;
+$("#cancelDeletePlanBtn").onclick=closeDeletePlan;
+$("#planDeleteModal").addEventListener("click",e=>{if(e.target===$("#planDeleteModal"))closeDeletePlan();});
 
 $("#showPlansBtn").onclick=()=>{const t=$$(".tab").find(x=>x.dataset.tab==="plans"); if(t)t.click();};
 $("#plansNewPlanBtn").onclick=()=>{state.plan=null;clearPlanForm();const t=$$(".tab").find(x=>x.dataset.tab==="plan");if(t)t.click();renderPlanList();renderCurrentPlan();};

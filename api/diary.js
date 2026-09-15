@@ -255,13 +255,58 @@ async function handlePost(req, res, session) {
       return sendJson(res, 404, { ok: false, message: "자료를 찾을 수 없습니다." });
     }
 
-    const { error } = await supabase
+    const { data: relatedTodos, error: todoFindError } = await supabase
+      .from("todos")
+      .select("id")
+      .eq("plan_id", body.id)
+      .eq("user_id", userId);
+
+    if (todoFindError) throw todoFindError;
+
+    const todoIds = (relatedTodos || []).map(t => t.id);
+
+    if (todoIds.length) {
+      const { error: logError } = await supabase
+        .from("work_logs")
+        .delete()
+        .in("todo_id", todoIds)
+        .eq("user_id", userId);
+
+      if (logError) throw logError;
+    }
+
+    const { error: reviewError } = await supabase
+      .from("reviews")
+      .delete()
+      .eq("plan_id", body.id)
+      .eq("user_id", userId);
+
+    if (reviewError) throw reviewError;
+
+    const { error: historyError } = await supabase
+      .from("plan_history")
+      .delete()
+      .eq("plan_id", body.id)
+      .eq("user_id", userId);
+
+    if (historyError) throw historyError;
+
+    const { error: todoError } = await supabase
+      .from("todos")
+      .delete()
+      .eq("plan_id", body.id)
+      .eq("user_id", userId);
+
+    if (todoError) throw todoError;
+
+    const { error: planError } = await supabase
       .from("plans")
       .delete()
       .eq("id", body.id)
       .eq("user_id", userId);
 
-    if (error) throw error;
+    if (planError) throw planError;
+
     return sendJson(res, 200, { ok: true });
   }
 
