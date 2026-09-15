@@ -4,8 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>플랜두씨 다이어리</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>
+<style>
     :root{
       --bg:#f4f8fb; --card:#ffffff; --line:#dbe6ee; --text:#1d2a33; --muted:#6d7b86;
       --primary:#146b7d; --primary2:#1c879b; --soft:#e9f5f7; --green:#2a8a67;
@@ -360,17 +359,8 @@
 
 <script>
 /* =========================
-   1) Supabase 설정
-   =========================
-   Vercel에 올리기 전에 아래 두 값을 본인 프로젝트 값으로 변경하세요.
-   anon key는 브라우저 공개용 키입니다. service_role key는 절대 넣지 마세요.
-*/
-const SUPABASE_URL = "https://kjuuhsknmsxhmsivxosl.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_cSbiHCM7mQu242tXV6RF4w_Uy5M3Grl";
-
-const configured = !SUPABASE_URL.includes("YOUR_") && !SUPABASE_ANON_KEY.includes("YOUR_");
-const sb = configured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
+   1) 앱 상태
+   ========================= */
 const state = { plan:null, plans:[], todos:[], logs:[], history:[], reviews:[] };
 let currentUser = null;
 
@@ -417,6 +407,42 @@ async function initAuth(){
   await loadLatestPlan();
 }
 
+async function diaryRequest(url, options={}){
+  const requestOptions={
+    credentials:"same-origin",
+    cache:"no-store",
+    ...options
+  };
+
+  if(requestOptions.body && !requestOptions.headers){
+    requestOptions.headers={"Content-Type":"application/json"};
+  }
+
+  const response=await fetch(url,requestOptions);
+
+  let data={};
+  try{ data=await response.json(); }catch{}
+
+  if(response.status===401){
+    location.replace("login.html");
+    throw new Error("로그인이 필요합니다.");
+  }
+
+  if(!response.ok){
+    throw new Error(data.message||"요청을 처리하지 못했습니다.");
+  }
+
+  return data;
+}
+
+function diaryAction(action,payload={}){
+  return diaryRequest("/api/diary",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action,...payload})
+  });
+}
+
 function toast(msg){
   const el=$("#toast"); el.textContent=msg; el.style.display="block";
   setTimeout(()=>el.style.display="none",2200);
@@ -429,7 +455,6 @@ function localDateTimeValue(d=new Date()){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function ensureDB(){
-  if(!configured){ toast("Supabase 설정을 확인해 주세요."); return false; }
   if(!currentUser){ location.replace("login.html"); return false; }
   return true;
 }
@@ -451,11 +476,18 @@ $$(".tab").forEach(btn=>btn.addEventListener("click",()=>{
    ========================= */
 async function loadLatestPlan(){
   if(!ensureDB()) return;
-  const {data,error}=await sb.from("plans").select("*").order("created_at",{ascending:false}).limit(1);
-  if(error){ toast(error.message); return; }
-  state.plan=data?.[0]||null;
-  if(state.plan) fillPlanForm(state.plan);
-  await refreshAll();
+
+  try{
+    const data=await diaryRequest("/api/diary?action=latest-plan");
+    state.plan=data.plan||null;
+
+    if(state.plan) fillPlanForm(state.plan);
+    else clearPlanForm();
+
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
 }
 function fillPlanForm(p){
   $("#planId").value=p.id||"";
@@ -472,6 +504,7 @@ function clearPlanForm(){
 }
 async function savePlan(){
   if(!ensureDB()) return;
+
   const id=$("#planId").value||null;
   const payload={
     title:$("#planTitle").value.trim(),
@@ -481,29 +514,22 @@ async function savePlan(){
     estimated_minutes:Number($("#planEstimate").value||0),
     priority:$("#planPriority").value
   };
-  if(!payload.title){toast("계획 제목을 입력해 주세요.");return;}
 
-  if(id){
-    const old=state.plan;
-    if(old){
-      const hist={
-        plan_id:old.id,title:old.title,start_date:old.start_date,end_date:old.end_date,
-        success_criteria:old.success_criteria,estimated_minutes:old.estimated_minutes,
-        priority:old.priority,snapshot_at:new Date().toISOString()
-      };
-      const {error:herr}=await sb.from("plan_history").insert(hist);
-      if(herr){toast("이력 저장 실패: "+herr.message);return;}
-    }
-    const {data,error}=await sb.from("plans").update(payload).eq("id",id).select().single();
-    if(error){toast(error.message);return;}
-    state.plan=data;
-    toast("계획을 수정했고 이전 값은 이력에 남겼습니다.");
-  }else{
-    const {data,error}=await sb.from("plans").insert(payload).select().single();
-    if(error){toast(error.message);return;}
-    state.plan=data; fillPlanForm(data); toast("새 계획을 저장했습니다.");
+  if(!payload.title){
+    toast("계획 제목을 입력해 주세요.");
+    return;
   }
-  await refreshAll();
+
+  try{
+    const result=await diaryAction("save-plan",{id,payload});
+    state.plan=result.plan;
+    fillPlanForm(state.plan);
+
+    toast(id?"계획을 수정했습니다.":"새 계획을 저장했습니다.");
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
 }
 
 function filteredPlans(){
@@ -649,27 +675,53 @@ function openTodo(todo=null){
 function closeTodo(){ $("#todoModal").classList.remove("show"); }
 async function saveTodo(){
   if(!ensureDB())return;
+
   const id=$("#todoId").value||null;
   const payload={
-    plan_id:activePlanId(),title:$("#todoTitle").value.trim(),
-    deadline:$("#todoDeadline").value||null,priority:$("#todoPriority").value,
-    tag:$("#todoTag").value.trim(),estimated_minutes:Number($("#todoEstimate").value||0)
+    plan_id:activePlanId(),
+    title:$("#todoTitle").value.trim(),
+    deadline:$("#todoDeadline").value||null,
+    priority:$("#todoPriority").value,
+    tag:$("#todoTag").value.trim(),
+    estimated_minutes:Number($("#todoEstimate").value||0)
   };
-  if(!payload.title){toast("할 일 제목을 입력해 주세요.");return;}
-  let q=id?sb.from("todos").update(payload).eq("id",id):sb.from("todos").insert({...payload,status:"todo"});
-  const {error}=await q;
-  if(error){toast(error.message);return;}
-  closeTodo(); toast(id?"할 일을 수정했습니다.":"할 일을 추가했습니다."); await refreshAll();
+
+  if(!payload.title){
+    toast("할 일 제목을 입력해 주세요.");
+    return;
+  }
+
+  try{
+    await diaryAction("save-todo",{id,payload});
+    closeTodo();
+    toast(id?"할 일을 수정했습니다.":"할 일을 추가했습니다.");
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
 }
+
 async function toggleTodo(id,status){
-  const next=status==="done"?"todo":"done";
-  const {error}=await sb.from("todos").update({status:next,completed_at:next==="done"?new Date().toISOString():null}).eq("id",id);
-  if(error){toast(error.message);return;} await refreshAll();
+  try{
+    await diaryAction("toggle-todo",{id,status});
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
 }
+
 async function deleteTodo(id){
   if(!confirm("이 할 일을 삭제할까요? 연결된 실행 기록도 삭제될 수 있습니다."))return;
-  const {error}=await sb.from("todos").delete().eq("id",id); if(error){toast(error.message);return;} await refreshAll(); toast("삭제했습니다.");
+
+  try{
+    await diaryAction("delete-todo",{id});
+    await refreshAll();
+    toast("삭제했습니다.");
+  }catch(error){
+    toast(error.message);
+  }
 }
+
 function filteredTodos(){
   const q=$("#todoSearch").value.trim().toLowerCase(), st=$("#todoStatusFilter").value, pr=$("#todoPriorityFilter").value, sort=$("#todoSort").value;
   let arr=state.todos.filter(t=>t.plan_id===activePlanId()).filter(t=>(!q||`${t.title} ${t.tag||""}`.toLowerCase().includes(q))&&(st==="all"||t.status===st)&&(pr==="all"||t.priority===pr));
@@ -723,14 +775,40 @@ function renderLogTodoOptions(){
 }
 async function saveLog(){
   if(!ensureDB())return;
-  const todo_id=$("#logTodo").value; if(!todo_id){toast("연결할 할 일을 선택해 주세요.");return;}
-  const st=$("#logStart").value, en=$("#logEnd").value;
+
+  const todo_id=$("#logTodo").value;
+  if(!todo_id){
+    toast("연결할 할 일을 선택해 주세요.");
+    return;
+  }
+
+  const st=$("#logStart").value;
+  const en=$("#logEnd").value;
   let actual=Number($("#logActual").value||0);
-  if(!actual && st && en) actual=Math.max(0,Math.round((new Date(en)-new Date(st))/60000));
-  const payload={todo_id,started_at:st?new Date(st).toISOString():null,ended_at:en?new Date(en).toISOString():null,actual_minutes:actual,blocker:$("#logBlocker").value.trim()};
-  const {error}=await sb.from("work_logs").insert(payload); if(error){toast(error.message);return;}
-  $("#logBlocker").value=""; $("#logActual").value=""; toast("실행 기록을 저장했습니다."); await refreshAll();
+
+  if(!actual && st && en){
+    actual=Math.max(0,Math.round((new Date(en)-new Date(st))/60000));
+  }
+
+  const payload={
+    todo_id,
+    started_at:st?new Date(st).toISOString():null,
+    ended_at:en?new Date(en).toISOString():null,
+    actual_minutes:actual,
+    blocker:$("#logBlocker").value.trim()
+  };
+
+  try{
+    await diaryAction("save-log",{payload});
+    $("#logBlocker").value="";
+    $("#logActual").value="";
+    toast("실행 기록을 저장했습니다.");
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
 }
+
 function renderLogs(){
   const todoIds=new Set(state.todos.filter(t=>t.plan_id===activePlanId()).map(t=>t.id));
   const logs=state.logs.filter(l=>todoIds.has(l.todo_id)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
@@ -778,11 +856,24 @@ function renderEvidence(type){
 }
 async function saveReview(){
   if(!ensureDB()||!activePlanId())return;
+
   const content=$("#reviewText").value.trim();
   const existing=state.reviews.find(x=>x.plan_id===activePlanId());
-  let q=existing?sb.from("reviews").update({content}).eq("id",existing.id):sb.from("reviews").insert({plan_id:activePlanId(),content});
-  const {error}=await q; if(error){toast(error.message);return;} await refreshAll(); toast("회고를 저장했습니다.");
+
+  try{
+    await diaryAction("save-review",{
+      id:existing?.id||null,
+      plan_id:activePlanId(),
+      content
+    });
+
+    await refreshAll();
+    toast("회고를 저장했습니다.");
+  }catch(error){
+    toast(error.message);
+  }
 }
+
 async function createNextPlan(){
   if(!activePlanId()){toast("현재 계획이 없습니다.");return;}
   await saveReview();
@@ -810,28 +901,31 @@ function renderHistory(){
    7) 데이터 로드
    ========================= */
 async function refreshAll(){
-  if(!configured){
-    renderCurrentPlan(); renderPlanList(); renderTodos(); renderTodoProgress(); renderLogTodoOptions(); renderLogs(); renderReview();
-    return;
-  }
   if(!currentUser) return;
-  const [plans,todos,logs,history,reviews]=await Promise.all([
-    sb.from("plans").select("*").order("created_at",{ascending:false}),
-    sb.from("todos").select("*"),
-    sb.from("work_logs").select("*"),
-    sb.from("plan_history").select("*"),
-    sb.from("reviews").select("*")
-  ]);
-  if(plans.error||todos.error||logs.error||history.error||reviews.error){
-    toast((plans.error||todos.error||logs.error||history.error||reviews.error).message);
-    return;
+
+  try{
+    const data=await diaryRequest("/api/diary?action=all");
+
+    state.plans=data.plans||[];
+    state.todos=data.todos||[];
+    state.logs=data.logs||[];
+    state.history=data.history||[];
+    state.reviews=data.reviews||[];
+
+    if(state.plan){
+      state.plan=state.plans.find(p=>p.id===state.plan.id)||null;
+    }
+
+    renderCurrentPlan();
+    renderPlanList();
+    renderTodos();
+    renderTodoProgress();
+    renderLogTodoOptions();
+    renderLogs();
+    renderReview();
+  }catch(error){
+    toast(error.message);
   }
-  state.plans=plans.data||[];
-  if(state.plan){
-    state.plan=state.plans.find(p=>p.id===state.plan.id)||state.plan;
-  }
-  state.todos=todos.data||[]; state.logs=logs.data||[]; state.history=history.data||[]; state.reviews=reviews.data||[];
-  renderCurrentPlan(); renderPlanList(); renderTodos(); renderTodoProgress(); renderLogTodoOptions(); renderLogs(); renderReview();
 }
 
 /* =========================
