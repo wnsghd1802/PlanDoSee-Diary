@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>플랜두씨 다이어리 로그인</title>
+<style>
+    :root{
+      --bg:#f4f8fb; --card:#ffffff; --line:#dbe6ee; --text:#1d2a33; --muted:#6d7b86;
+      --primary:#146b7d; --primary2:#1c879b; --soft:#e9f5f7; --danger:#b94b4b;
+      --shadow:0 10px 30px rgba(20,50,70,.08);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,"Noto Sans KR",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      color:var(--text);
+      background:linear-gradient(180deg,#edf6f9 0,#f8fbfc 42%,#f4f8fb 100%);
+      min-height:100vh;
+    }
+    button,input{font:inherit}
+    button{cursor:pointer}
+    .auth-screen{min-height:100vh;display:grid;place-items:center;padding:24px}
+    .auth-card{
+      width:min(440px,100%);
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:22px;
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .auth-head{
+      padding:26px 26px 18px;
+      background:linear-gradient(135deg,#eef8fa,#ffffff);
+      border-bottom:1px solid var(--line);
+    }
+    .auth-head h1{margin:0 0 8px;font-size:27px;letter-spacing:-.03em}
+    .auth-head p{margin:0;color:var(--muted);line-height:1.55}
+    .auth-body{padding:24px 26px 26px}
+    label{display:block;font-size:13px;font-weight:800;margin-bottom:6px;color:#4b5b65}
+    input{
+      width:100%;border:1px solid #cfdce4;border-radius:11px;padding:11px 12px;
+      background:#fff;outline:none;
+    }
+    input:focus{border-color:var(--primary2);box-shadow:0 0 0 3px rgba(28,135,155,.11)}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+    .btn{border:0;border-radius:10px;padding:10px 14px;font-weight:800}
+    .btn.primary{background:var(--primary);color:#fff}
+    .btn.secondary{background:#edf3f6;color:#3a515e}
+    .auth-message{
+      display:none;margin:0 0 14px;padding:11px 12px;border-radius:10px;
+      font-size:13px;line-height:1.5;
+    }
+    .auth-message.show{display:block}
+    .auth-message.error{background:#fff0f0;color:#9d4545;border:1px solid #f0caca}
+    .auth-message.success{background:#eef8f2;color:#347152;border:1px solid #cfe7d9}
+    .auth-help{margin-top:14px;color:var(--muted);font-size:12px;line-height:1.55}
+  </style>
+</head>
+<body>
+<section class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-head">
+      <h1>플랜두씨 다이어리</h1>
+      <p>내 기록은 로그인한 뒤에만 볼 수 있습니다.</p>
+    </div>
+    <div class="auth-body">
+      <div class="auth-message" id="authMessage"></div>
+
+      <div>
+        <label for="authUsername">아이디</label>
+        <input id="authUsername" type="text" autocomplete="username" maxlength="20" placeholder="아이디 입력">
+      </div>
+
+      <div style="margin-top:12px">
+        <label for="authPassword">비밀번호</label>
+        <input id="authPassword" type="password" autocomplete="current-password" placeholder="비밀번호 입력">
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="loginBtn">로그인</button>
+        <button class="btn secondary" id="signupBtn">회원가입</button>
+      </div>
+
+      <div class="auth-help">
+        아이디와 비밀번호를 입력해 로그인하거나 회원가입할 수 있습니다.
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = s => document.querySelector(s);
+
+function setAuthMessage(message="", type="error"){
+  const el=$("#authMessage");
+  el.textContent=message;
+  el.className="auth-message"+(message?` show ${type}`:"");
+}
+
+function normalizeUsername(value=""){
+  return value.trim().toLowerCase();
+}
+
+async function apiRequest(path, body){
+  const response=await fetch(path,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    credentials:"same-origin",
+    body:JSON.stringify(body)
+  });
+
+  let data={};
+  try{ data=await response.json(); }catch{}
+  return {response,data};
+}
+
+async function signUp(){
+  const username=normalizeUsername($("#authUsername").value);
+  const password=$("#authPassword").value;
+
+  if(!username || !password){
+    setAuthMessage("아이디와 비밀번호를 모두 입력해 주세요.");
+    return;
+  }
+
+  $("#signupBtn").disabled=true;
+  try{
+    const {response,data}=await apiRequest("/api/auth/signup",{username,password});
+    if(!response.ok){
+      setAuthMessage(data.message||"회원가입에 실패했습니다.");
+      return;
+    }
+    location.replace("index.html");
+  }catch{
+    setAuthMessage("서버에 연결하지 못했습니다.");
+  }finally{
+    $("#signupBtn").disabled=false;
+  }
+}
+
+async function signIn(){
+  const username=normalizeUsername($("#authUsername").value);
+  const password=$("#authPassword").value;
+
+  if(!username || !password){
+    setAuthMessage("아이디와 비밀번호를 모두 입력해 주세요.");
+    return;
+  }
+
+  $("#loginBtn").disabled=true;
+  try{
+    const {response,data}=await apiRequest("/api/auth/login",{username,password});
+    if(!response.ok){
+      setAuthMessage(data.message||"로그인에 실패했습니다.");
+      return;
+    }
+    location.replace("index.html");
+  }catch{
+    setAuthMessage("서버에 연결하지 못했습니다.");
+  }finally{
+    $("#loginBtn").disabled=false;
+  }
+}
+
+async function init(){
+  try{
+    const response=await fetch("/api/auth/me",{credentials:"same-origin",cache:"no-store"});
+    if(response.ok) location.replace("index.html");
+  }catch{}
+}
+
+$("#loginBtn").onclick=signIn;
+$("#signupBtn").onclick=signUp;
+$("#authPassword").addEventListener("keydown",e=>{if(e.key==="Enter")signIn();});
+init();
+</script>
+</body>
+</html>
