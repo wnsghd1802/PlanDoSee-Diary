@@ -883,8 +883,13 @@ window.editTodo=id=>openTodo(state.todos.find(t=>t.id===id));
    5) 실행 기록
    ========================= */
 function renderLogTodoOptions(){
-  const arr=state.todos.filter(t=>t.plan_id===activePlanId());
-  $("#logTodo").innerHTML=arr.length?arr.map(t=>`<option value="${t.id}">${escapeHTML(t.title)}</option>`).join(""):'<option value="">할 일이 없습니다.</option>';
+  const arr=state.todos
+    .filter(t=>t.plan_id===activePlanId())
+    .sort((a,b)=>Number(b.is_plan_task)-Number(a.is_plan_task));
+
+  $("#logTodo").innerHTML=arr.length
+    ? arr.map(t=>`<option value="${t.id}">${escapeHTML(t.title)}</option>`).join("")
+    : '<option value="">할 일이 없습니다.</option>';
 }
 async function saveLog(){
   if(!ensureDB())return;

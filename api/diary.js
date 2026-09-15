@@ -124,6 +124,61 @@ async function handleGet(req, res, session) {
   return sendJson(res, 400, { ok: false, message: "잘못된 요청입니다." });
 }
 
+function planScheduleISO(payload = {}) {
+  if (!payload.start_date || !payload.start_time) return null;
+
+  const time = String(payload.start_time).length === 5
+    ? `${payload.start_time}:00`
+    : payload.start_time;
+
+  const d = new Date(`${payload.start_date}T${time}+09:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+async function syncPlanTask(supabase, userId, plan) {
+  const values = {
+    user_id: userId,
+    plan_id: plan.id,
+    title: plan.title,
+    deadline: plan.end_date || null,
+    priority: plan.priority || "medium",
+    tag: "",
+    estimated_minutes: Number(plan.estimated_minutes || 0),
+    scheduled_start: planScheduleISO(plan),
+    is_plan_task: true
+  };
+
+  const { data: existing, error: findError } = await supabase
+    .from("todos")
+    .select("id, status")
+    .eq("user_id", userId)
+    .eq("plan_id", plan.id)
+    .eq("is_plan_task", true)
+    .maybeSingle();
+
+  if (findError) throw findError;
+
+  if (existing) {
+    const { error } = await supabase
+      .from("todos")
+      .update(values)
+      .eq("id", existing.id)
+      .eq("user_id", userId);
+
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase
+    .from("todos")
+    .insert({
+      ...values,
+      status: "todo"
+    });
+
+  if (error) throw error;
+}
+
 async function handlePost(req, res, session) {
   const supabase = getAdminClient();
   const userId = session.user.id;
@@ -176,6 +231,8 @@ async function handlePost(req, res, session) {
         return sendJson(res, 404, { ok: false, message: "자료를 찾을 수 없습니다." });
       }
 
+      await syncPlanTask(supabase, userId, data);
+
       return sendJson(res, 200, { ok: true, plan: data });
     }
 
@@ -186,6 +243,9 @@ async function handlePost(req, res, session) {
       .single();
 
     if (error) throw error;
+
+    await syncPlanTask(supabase, userId, data);
+
     return sendJson(res, 201, { ok: true, plan: data });
   }
 
