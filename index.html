@@ -52,6 +52,7 @@
     .meta{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
     .chip{border-radius:999px;padding:6px 9px;background:#eef5f7;color:#46606b;font-size:12px;font-weight:700}
     .chip.high{background:#fff0f0;color:#9e4545}.chip.medium{background:#fff7e7;color:#a36c18}.chip.low{background:#eef7ef;color:#3c7a50}
+    .chip.running{background:#e8f6fa;color:#146b7d}
     .progress{height:10px;background:#e9eef1;border-radius:999px;overflow:hidden}.progress>i{display:block;height:100%;background:var(--primary2);width:0}
     .todo-list,.log-list,.history-list,.evidence-list{display:flex;flex-direction:column;gap:10px}
     .todo{border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start}
@@ -179,7 +180,11 @@
           </div>
           <div class="row" style="margin-top:12px">
             <div><label>시작일</label><input id="planStart" type="date"></div>
+            <div><label>시작 시간</label><input id="planStartTime" type="time"></div>
+          </div>
+          <div class="row" style="margin-top:12px">
             <div><label>종료일</label><input id="planEnd" type="date"></div>
+            <div><label>종료 시간</label><input id="planEndTime" type="time"></div>
           </div>
           <div style="margin-top:12px">
             <label>성공 기준</label>
@@ -251,7 +256,7 @@
             <input id="todoSearch" placeholder="할 일 검색">
             <select id="todoStatusFilter"><option value="all">전체 상태</option><option value="todo">할 일</option><option value="done">완료</option></select>
             <select id="todoPriorityFilter"><option value="all">전체 우선순위</option><option value="high">높음</option><option value="medium">중간</option><option value="low">낮음</option></select>
-            <select id="todoSort"><option value="created_desc">최근 생성순</option><option value="deadline_asc">마감일 빠른순</option><option value="priority">우선순위순</option><option value="estimate_desc">예상시간 긴순</option></select>
+            <select id="todoSort"><option value="created_desc">최근 생성순</option><option value="scheduled_asc">실행 예정 빠른순</option><option value="deadline_asc">마감일 빠른순</option><option value="priority">우선순위순</option><option value="estimate_desc">예상시간 긴순</option></select>
           </div>
           <div id="todoList" class="todo-list"></div>
         </div>
@@ -346,6 +351,10 @@
       <div class="row" style="margin-top:12px">
         <div><label>태그</label><input id="todoTag" placeholder="예: 네트워크"></div>
         <div><label>예상 시간(분)</label><input type="number" min="0" id="todoEstimate" placeholder="60"></div>
+      </div>
+      <div style="margin-top:12px">
+        <label>실행 예정</label>
+        <input type="datetime-local" id="todoScheduledStart">
       </div>
       <div class="actions">
         <button class="btn primary" id="saveTodoBtn">저장</button>
@@ -448,11 +457,30 @@ function toast(msg){
   setTimeout(()=>el.style.display="none",2200);
 }
 function fmtDate(v){ if(!v) return "-"; return new Date(v+"T00:00:00").toLocaleDateString("ko-KR"); }
+function fmtTime(v){
+  if(!v) return "";
+  return String(v).slice(0,5);
+}
+function fmtPlanPeriod(p){
+  const start=[fmtDate(p.start_date),fmtTime(p.start_time)].filter(Boolean).join(" ");
+  const end=[fmtDate(p.end_date),fmtTime(p.end_time)].filter(Boolean).join(" ");
+  return `${start||"-"} ~ ${end||"-"}`;
+}
 function fmtDT(v){ if(!v) return "-"; return new Date(v).toLocaleString("ko-KR"); }
 function priorityLabel(p){ return p==="high"?"높음":p==="low"?"낮음":"중간"; }
 function localDateTimeValue(d=new Date()){
   const pad=n=>String(n).padStart(2,"0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function dateTimeInputValue(v){
+  if(!v) return "";
+  return localDateTimeValue(new Date(v));
+}
+function fmtSchedule(v){
+  if(!v) return "-";
+  return new Date(v).toLocaleString("ko-KR",{
+    year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"
+  });
 }
 function ensureDB(){
   if(!currentUser){ location.replace("login.html"); return false; }
@@ -493,14 +521,17 @@ function fillPlanForm(p){
   $("#planId").value=p.id||"";
   $("#planTitle").value=p.title||"";
   $("#planStart").value=p.start_date||"";
+  $("#planStartTime").value=fmtTime(p.start_time);
   $("#planEnd").value=p.end_date||"";
+  $("#planEndTime").value=fmtTime(p.end_time);
   $("#planSuccess").value=p.success_criteria||"";
   $("#planEstimate").value=p.estimated_minutes??"";
   $("#planPriority").value=p.priority||"medium";
 }
 function clearPlanForm(){
   $("#planId").value=""; $("#planTitle").value=""; $("#planStart").value="";
-  $("#planEnd").value=""; $("#planSuccess").value=""; $("#planEstimate").value=""; $("#planPriority").value="medium";
+  $("#planStartTime").value=""; $("#planEnd").value=""; $("#planEndTime").value="";
+  $("#planSuccess").value=""; $("#planEstimate").value=""; $("#planPriority").value="medium";
 }
 async function savePlan(){
   if(!ensureDB()) return;
@@ -509,7 +540,9 @@ async function savePlan(){
   const payload={
     title:$("#planTitle").value.trim(),
     start_date:$("#planStart").value||null,
+    start_time:$("#planStartTime").value||null,
     end_date:$("#planEnd").value||null,
+    end_time:$("#planEndTime").value||null,
     success_criteria:$("#planSuccess").value.trim(),
     estimated_minutes:Number($("#planEstimate").value||0),
     priority:$("#planPriority").value
@@ -572,7 +605,7 @@ function renderPlanList(){
         <div class="plan-item-top">
           <div>
             <div class="plan-item-title">${escapeHTML(p.title)}</div>
-            <div class="muted">${fmtDate(p.start_date)} ~ ${fmtDate(p.end_date)}</div>
+            <div class="muted">${fmtPlanPeriod(p)}</div>
           </div>
           <div class="plan-item-actions">
             ${active?'<span class="chip">현재 선택</span>':`<button class="btn primary small" onclick="selectSavedPlan('${p.id}')">이 계획 사용</button>`}
@@ -605,7 +638,7 @@ function renderSelectedPlanSummary(){
   const done=related.filter(t=>t.status==="done").length;
   el.innerHTML=`
     <div class="plan-title">${escapeHTML(p.title)}</div>
-    <div class="muted">${fmtDate(p.start_date)} ~ ${fmtDate(p.end_date)}</div>
+    <div class="muted">${fmtPlanPeriod(p)}</div>
     <div class="meta">
       <span class="chip ${p.priority}">우선순위 ${priorityLabel(p.priority)}</span>
       <span class="chip">${done}/${related.length} 완료</span>
@@ -647,7 +680,7 @@ function renderCurrentPlan(){
   const pct=related.length?Math.round(done/related.length*100):0;
   el.innerHTML=`
     <div class="plan-title">${escapeHTML(p.title)}</div>
-    <div class="muted">${fmtDate(p.start_date)} ~ ${fmtDate(p.end_date)}</div>
+    <div class="muted">${fmtPlanPeriod(p)}</div>
     <div class="meta">
       <span class="chip ${p.priority}">우선순위 ${priorityLabel(p.priority)}</span>
       <span class="chip">예상 ${p.estimated_minutes||0}분</span>
@@ -671,6 +704,7 @@ function openTodo(todo=null){
   $("#todoPriority").value=todo?.priority||"medium";
   $("#todoTag").value=todo?.tag||"";
   $("#todoEstimate").value=todo?.estimated_minutes??"";
+  $("#todoScheduledStart").value=dateTimeInputValue(todo?.scheduled_start);
 }
 function closeTodo(){ $("#todoModal").classList.remove("show"); }
 async function saveTodo(){
@@ -683,7 +717,10 @@ async function saveTodo(){
     deadline:$("#todoDeadline").value||null,
     priority:$("#todoPriority").value,
     tag:$("#todoTag").value.trim(),
-    estimated_minutes:Number($("#todoEstimate").value||0)
+    estimated_minutes:Number($("#todoEstimate").value||0),
+    scheduled_start:$("#todoScheduledStart").value
+      ? new Date($("#todoScheduledStart").value).toISOString()
+      : null
   };
 
   if(!payload.title){
@@ -722,11 +759,32 @@ async function deleteTodo(id){
   }
 }
 
+async function startTodo(id){
+  try{
+    await diaryAction("start-todo",{id});
+    toast("실행을 시작했습니다.");
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
+}
+
+async function completeTodo(id){
+  try{
+    await diaryAction("complete-todo",{id});
+    toast("실행을 완료하고 기록을 저장했습니다.");
+    await refreshAll();
+  }catch(error){
+    toast(error.message);
+  }
+}
+
 function filteredTodos(){
   const q=$("#todoSearch").value.trim().toLowerCase(), st=$("#todoStatusFilter").value, pr=$("#todoPriorityFilter").value, sort=$("#todoSort").value;
   let arr=state.todos.filter(t=>t.plan_id===activePlanId()).filter(t=>(!q||`${t.title} ${t.tag||""}`.toLowerCase().includes(q))&&(st==="all"||t.status===st)&&(pr==="all"||t.priority===pr));
   const pri={high:1,medium:2,low:3};
   arr.sort((a,b)=>{
+    if(sort==="scheduled_asc") return (a.scheduled_start||"9999").localeCompare(b.scheduled_start||"9999");
     if(sort==="deadline_asc") return (a.deadline||"9999").localeCompare(b.deadline||"9999");
     if(sort==="priority") return pri[a.priority]-pri[b.priority];
     if(sort==="estimate_desc") return (b.estimated_minutes||0)-(a.estimated_minutes||0);
@@ -736,34 +794,89 @@ function filteredTodos(){
 }
 function renderTodos(){
   const el=$("#todoList"),arr=filteredTodos();
-  if(!activePlanId()){el.innerHTML='<div class="empty">계획을 먼저 저장해 주세요.</div>';return;}
-  if(!arr.length){el.innerHTML='<div class="empty">조건에 맞는 할 일이 없습니다.</div>';return;}
-  el.innerHTML=arr.map(t=>`
-    <div class="todo ${t.status==="done"?"done":""}">
-      <input class="check" type="checkbox" ${t.status==="done"?"checked":""} onchange="toggleTodo('${t.id}','${t.status}')">
-      <div>
-        <div class="todo-title">${escapeHTML(t.title)}</div>
-        <div class="meta">
-          <span class="chip ${t.priority}">${priorityLabel(t.priority)}</span>
-          ${t.tag?`<span class="chip">#${escapeHTML(t.tag)}</span>`:""}
-          <span class="chip">예상 ${t.estimated_minutes||0}분</span>
-          <span class="chip">마감 ${fmtDate(t.deadline)}</span>
+
+  if(!activePlanId()){
+    el.innerHTML='<div class="empty">계획을 먼저 저장해 주세요.</div>';
+    return;
+  }
+
+  if(!arr.length){
+    el.innerHTML='<div class="empty">조건에 맞는 할 일이 없습니다.</div>';
+    return;
+  }
+
+  el.innerHTML=arr.map(t=>{
+    const runningLog=state.logs.find(l=>l.todo_id===t.id&&l.is_running===true);
+    const isRunning=!!runningLog;
+
+    return `
+      <div class="todo ${t.status==="done"?"done":""}">
+        <input class="check" type="checkbox"
+          ${t.status==="done"?"checked":""}
+          ${isRunning?"disabled":""}
+          onchange="toggleTodo('${t.id}','${t.status}')">
+
+        <div>
+          <div class="todo-title">${escapeHTML(t.title)}</div>
+          <div class="meta">
+            <span class="chip ${t.priority}">${priorityLabel(t.priority)}</span>
+            ${t.tag?`<span class="chip">#${escapeHTML(t.tag)}</span>`:""}
+            <span class="chip">예상 ${t.estimated_minutes||0}분</span>
+            <span class="chip">마감 ${fmtDate(t.deadline)}</span>
+            ${t.scheduled_start?`<span class="chip">실행 ${fmtSchedule(t.scheduled_start)}</span>`:""}
+            ${isRunning?`<span class="chip running">진행 중 · ${fmtDT(runningLog.started_at)}</span>`:""}
+          </div>
         </div>
-      </div>
-      <div class="todo-actions">
-        <button class="btn ghost small" onclick="editTodo('${t.id}')">수정</button>
-        <button class="btn danger small" onclick="deleteTodo('${t.id}')">삭제</button>
-      </div>
-    </div>`).join("");
+
+        <div class="todo-actions">
+          ${t.status!=="done" && !isRunning
+            ? `<button class="btn secondary small" onclick="startTodo('${t.id}')">시작</button>`
+            : ""}
+          ${t.status!=="done" && isRunning
+            ? `<button class="btn primary small" onclick="completeTodo('${t.id}')">완료</button>`
+            : ""}
+          <button class="btn ghost small" onclick="editTodo('${t.id}')">수정</button>
+          <button class="btn danger small" onclick="deleteTodo('${t.id}')">삭제</button>
+        </div>
+      </div>`;
+  }).join("");
 }
+
 function renderTodoProgress(){
-  const arr=state.todos.filter(t=>t.plan_id===activePlanId()),done=arr.filter(t=>t.status==="done").length,pct=arr.length?Math.round(done/arr.length*100):0;
-  $("#todoProgress").innerHTML=activePlanId()?`
+  const arr=state.todos.filter(t=>t.plan_id===activePlanId());
+  const done=arr.filter(t=>t.status==="done").length;
+  const pct=arr.length?Math.round(done/arr.length*100):0;
+
+  if(!activePlanId()){
+    $("#todoProgress").innerHTML='<div class="empty">계획을 먼저 선택해 주세요.</div>';
+    return;
+  }
+
+  const scheduled=arr
+    .filter(t=>t.status!=="done"&&t.scheduled_start)
+    .sort((a,b)=>new Date(a.scheduled_start)-new Date(b.scheduled_start))
+    .slice(0,3);
+
+  $("#todoProgress").innerHTML=`
     <div style="display:flex;justify-content:space-between"><b>${done}/${arr.length} 완료</b><span>${pct}%</span></div>
     <div class="progress" style="margin:10px 0 15px"><i style="width:${pct}%"></i></div>
-    <div class="muted">예상시간 합계 ${arr.reduce((s,t)=>s+(t.estimated_minutes||0),0)}분</div>`:'<div class="empty">계획을 먼저 선택해 주세요.</div>';
+    <div class="muted">예상시간 합계 ${arr.reduce((s,t)=>s+(t.estimated_minutes||0),0)}분</div>
+    ${scheduled.length?`
+      <div class="section-title">실행 예정</div>
+      ${scheduled.map(t=>`
+        <div class="history-item" style="margin-top:8px">
+          <b>${escapeHTML(t.title)}</b>
+          <div class="muted" style="margin-top:4px">${fmtSchedule(t.scheduled_start)}</div>
+        </div>
+      `).join("")}
+    `:""}
+  `;
 }
-window.toggleTodo=toggleTodo; window.deleteTodo=deleteTodo;
+
+window.toggleTodo=toggleTodo;
+window.deleteTodo=deleteTodo;
+window.startTodo=startTodo;
+window.completeTodo=completeTodo;
 window.editTodo=id=>openTodo(state.todos.find(t=>t.id===id));
 
 /* =========================
@@ -811,12 +924,20 @@ async function saveLog(){
 
 function renderLogs(){
   const todoIds=new Set(state.todos.filter(t=>t.plan_id===activePlanId()).map(t=>t.id));
-  const logs=state.logs.filter(l=>todoIds.has(l.todo_id)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const logs=state.logs
+    .filter(l=>todoIds.has(l.todo_id))
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+
   const byId=Object.fromEntries(state.todos.map(t=>[t.id,t]));
+
   $("#logList").innerHTML=logs.length?logs.map(l=>`
     <div class="log-item">
       <b>${escapeHTML(byId[l.todo_id]?.title||"삭제된 할 일")}</b>
-      <div class="muted" style="margin-top:5px">${fmtDT(l.started_at)} → ${fmtDT(l.ended_at)} · 실제 ${l.actual_minutes||0}분</div>
+      <div class="muted" style="margin-top:5px">
+        ${l.is_running
+          ? `${fmtDT(l.started_at)} · 진행 중`
+          : `${fmtDT(l.started_at)} → ${fmtDT(l.ended_at)} · 실제 ${l.actual_minutes||0}분`}
+      </div>
       ${l.blocker?`<div style="margin-top:6px"><b>막힌 이유:</b> ${escapeHTML(l.blocker)}</div>`:""}
     </div>`).join(""):'<div class="empty">아직 실행 기록이 없습니다.</div>';
 }
@@ -892,7 +1013,7 @@ function renderHistory(){
     <div class="history-item">
       <b>${i===0?"최초/이전 계획":"변경 전 계획 "+(i+1)}</b>
       <div style="margin-top:5px">${escapeHTML(h.title||"")}</div>
-      <div class="muted">${fmtDate(h.start_date)} ~ ${fmtDate(h.end_date)} · 예상 ${h.estimated_minutes||0}분 · ${priorityLabel(h.priority)}</div>
+      <div class="muted">${fmtPlanPeriod(h)} · 예상 ${h.estimated_minutes||0}분 · ${priorityLabel(h.priority)}</div>
       <div class="muted" style="margin-top:4px">저장 ${fmtDT(h.snapshot_at)}</div>
     </div>`).join(""):'<div class="empty">아직 계획 변경 이력이 없습니다.</div>';
 }

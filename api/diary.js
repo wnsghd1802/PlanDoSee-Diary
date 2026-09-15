@@ -9,7 +9,9 @@ function planPayload(value = {}) {
   return {
     title: String(value.title || "").trim(),
     start_date: value.start_date || null,
+    start_time: value.start_time || null,
     end_date: value.end_date || null,
+    end_time: value.end_time || null,
     success_criteria: String(value.success_criteria || "").trim(),
     estimated_minutes: Number(value.estimated_minutes || 0),
     priority: ["high", "medium", "low"].includes(value.priority) ? value.priority : "medium"
@@ -23,7 +25,8 @@ function todoPayload(value = {}) {
     deadline: value.deadline || null,
     priority: ["high", "medium", "low"].includes(value.priority) ? value.priority : "medium",
     tag: String(value.tag || "").trim(),
-    estimated_minutes: Number(value.estimated_minutes || 0)
+    estimated_minutes: Number(value.estimated_minutes || 0),
+    scheduled_start: value.scheduled_start || null
   };
 }
 
@@ -145,7 +148,9 @@ async function handlePost(req, res, session) {
         plan_id: old.id,
         title: old.title,
         start_date: old.start_date,
+        start_time: old.start_time,
         end_date: old.end_date,
+        end_time: old.end_time,
         success_criteria: old.success_criteria,
         estimated_minutes: old.estimated_minutes,
         priority: old.priority,
@@ -254,6 +259,25 @@ async function handlePost(req, res, session) {
       return sendJson(res, 404, { ok: false, message: "자료를 찾을 수 없습니다." });
     }
 
+    if (body.status !== "done") {
+      const { data: running, error: runningError } = await supabase
+        .from("work_logs")
+        .select("id")
+        .eq("todo_id", body.id)
+        .eq("user_id", userId)
+        .eq("is_running", true)
+        .maybeSingle();
+
+      if (runningError) throw runningError;
+
+      if (running) {
+        return sendJson(res, 409, {
+          ok: false,
+          message: "진행 중인 할 일은 완료 버튼으로 종료해 주세요."
+        });
+      }
+    }
+
     const next = body.status === "done" ? "todo" : "done";
 
     const { data, error } = await supabase
@@ -300,6 +324,112 @@ async function handlePost(req, res, session) {
     return sendJson(res, 200, { ok: true });
   }
 
+  if (action === "start-todo") {
+    const todo = await ownedTodo(supabase, userId, body.id);
+
+    if (!todo) {
+      return sendJson(res, 404, { ok: false, message: "자료를 찾을 수 없습니다." });
+    }
+
+    if (todo.status === "done") {
+      return sendJson(res, 400, { ok: false, message: "이미 완료된 할 일입니다." });
+    }
+
+    const { data: running, error: runningError } = await supabase
+      .from("work_logs")
+      .select("id")
+      .eq("todo_id", body.id)
+      .eq("user_id", userId)
+      .eq("is_running", true)
+      .maybeSingle();
+
+    if (runningError) throw runningError;
+
+    if (running) {
+      return sendJson(res, 409, { ok: false, message: "이미 실행 중입니다." });
+    }
+
+    const startedAt = new Date().toISOString();
+
+    const { data: log, error } = await supabase
+      .from("work_logs")
+      .insert({
+        user_id: userId,
+        todo_id: todo.id,
+        started_at: startedAt,
+        ended_at: null,
+        actual_minutes: 0,
+        blocker: "",
+        is_running: true
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    return sendJson(res, 201, { ok: true, log });
+  }
+
+  if (action === "complete-todo") {
+    const todo = await ownedTodo(supabase, userId, body.id);
+
+    if (!todo) {
+      return sendJson(res, 404, { ok: false, message: "자료를 찾을 수 없습니다." });
+    }
+
+    const { data: running, error: runningError } = await supabase
+      .from("work_logs")
+      .select("*")
+      .eq("todo_id", body.id)
+      .eq("user_id", userId)
+      .eq("is_running", true)
+      .maybeSingle();
+
+    if (runningError) throw runningError;
+
+    if (!running) {
+      return sendJson(res, 400, { ok: false, message: "진행 중인 실행 기록이 없습니다." });
+    }
+
+    const endedAt = new Date();
+    const startedAt = new Date(running.started_at);
+    const elapsedMs = Math.max(0, endedAt.getTime() - startedAt.getTime());
+    const actualMinutes = elapsedMs > 0 ? Math.max(1, Math.round(elapsedMs / 60000)) : 0;
+
+    const { data: log, error: logError } = await supabase
+      .from("work_logs")
+      .update({
+        ended_at: endedAt.toISOString(),
+        actual_minutes: actualMinutes,
+        is_running: false
+      })
+      .eq("id", running.id)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+
+    if (logError) throw logError;
+
+    const { data: updatedTodo, error: todoError } = await supabase
+      .from("todos")
+      .update({
+        status: "done",
+        completed_at: endedAt.toISOString()
+      })
+      .eq("id", todo.id)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+
+    if (todoError) throw todoError;
+
+    return sendJson(res, 200, {
+      ok: true,
+      todo: updatedTodo,
+      log
+    });
+  }
+
   if (action === "save-log") {
     const payload = body.payload || {};
     const todo = await ownedTodo(supabase, userId, payload.todo_id);
@@ -314,7 +444,8 @@ async function handlePost(req, res, session) {
       started_at: payload.started_at || null,
       ended_at: payload.ended_at || null,
       actual_minutes: Number(payload.actual_minutes || 0),
-      blocker: String(payload.blocker || "").trim()
+      blocker: String(payload.blocker || "").trim(),
+      is_running: false
     };
 
     const { data, error } = await supabase
