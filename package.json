@@ -1,0 +1,11 @@
+{
+  "name": "plandosee-diary-custom-auth",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "2.116.0",
+    "bcryptjs": "3.0.3",
+    "jsonwebtoken": "9.0.3"
+  }
+}
