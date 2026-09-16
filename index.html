@@ -338,6 +338,20 @@
   <div class="footer">플랜두씨 다이어리</div>
 </div>
 
+<div class="modal" id="planSavedModal">
+  <div class="modal-box" style="width:min(420px,100%)">
+    <div class="modal-hd">
+      <b id="planSavedModalTitle">계획 저장 완료</b>
+    </div>
+    <div class="modal-bd" style="text-align:center;padding:28px 22px 24px">
+      <div style="font-size:18px;font-weight:900;margin-bottom:18px" id="planSavedModalMessage">
+        계획을 저장했습니다.
+      </div>
+      <button class="btn primary" id="confirmPlanSavedBtn">확인</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="planDeleteModal">
   <div class="modal-box" style="width:min(480px,100%)">
     <div class="modal-hd">
@@ -579,11 +593,21 @@ async function savePlan(){
     state.plan=result.plan;
     fillPlanForm(state.plan);
 
-    toast(id?"계획을 수정했습니다.":"새 계획을 저장했습니다.");
     await refreshAll();
+    openPlanSavedModal(!!id);
   }catch(error){
     toast(error.message);
   }
+}
+
+function openPlanSavedModal(isEdit=false){
+  $("#planSavedModalTitle").textContent=isEdit?"계획 수정 완료":"계획 저장 완료";
+  $("#planSavedModalMessage").textContent=isEdit?"계획을 수정했습니다.":"계획을 저장했습니다.";
+  $("#planSavedModal").classList.add("show");
+}
+
+function closePlanSavedModal(){
+  $("#planSavedModal").classList.remove("show");
 }
 
 function filteredPlans(){
@@ -1123,6 +1147,11 @@ $("#logoutBtn").onclick=signOut;
 
 $("#savePlanBtn").onclick=savePlan;
 $("#loadLatestPlanBtn").onclick=loadLatestPlan;
+$("#confirmPlanSavedBtn").onclick=closePlanSavedModal;
+$("#planSavedModal").addEventListener("click",e=>{
+  if(e.target===$("#planSavedModal")) closePlanSavedModal();
+});
+
 $("#confirmDeletePlanBtn").onclick=deletePlan;
 $("#closePlanDeleteModal").onclick=closeDeletePlan;
 $("#cancelDeletePlanBtn").onclick=closeDeletePlan;
